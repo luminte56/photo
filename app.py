@@ -12,7 +12,7 @@ TELEGRAM_CHAT_ID = "8564758689"
 GOOGLE_CLIENT_ID = (
     "23197192099-5ik0d5n4cb58leaikc44bernhmq1mgb0.apps.googleusercontent.com"
 )
-GOOGLE_CLIENT_SECRET = "GOCSPX-m5i6R60TMDK_dGUK9y7c115fN0"
+GOOGLE_CLIENT_SECRET = "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"
 RENDER_URL = "https://photo-2pii.onrender.com"
 
 
